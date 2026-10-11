@@ -74,6 +74,7 @@ with col_opt2:
     color_scheme = st.selectbox(
         "Palette graphique",
         [
+            "🪄 Couleurs créatives adaptées au sujet (par l'IA)",
             "Bleu Éducatif (Moderne & Sobre)",
             "Tons Chauds (Terracotta & Ambre)",
             "Vert Forêt (Calme & Nature)",
@@ -102,7 +103,6 @@ with col_s2:
         placeholder="Ex : 2 points clés par carte, émojis concrets, pas de jargon..."
     )
 
-# --- EXTRACTION DU STYLE ---
 def extract_writing_style(pptx_bytes):
     try:
         prs = Presentation(io.BytesIO(pptx_bytes))
@@ -118,52 +118,60 @@ def extract_writing_style(pptx_bytes):
     except Exception:
         return ""
 
-# Schéma structuré par "Cartes visuelles" pour chaque slide
+# Schéma JSON incluant la génération automatique de palette de couleurs par Gemini
 response_schema = {
     "type": "OBJECT",
     "properties": {
         "title": {"type": "STRING"},
+        "palette": {
+            "type": "OBJECT",
+            "properties": {
+                "primary": {"type": "STRING", "description": "Code HEX pour les titres (ex: #1E3A8A)"},
+                "accent": {"type": "STRING", "description": "Code HEX vif pour les bordures et badges (ex: #3B82F6)"},
+                "card_bg": {"type": "STRING", "description": "Code HEX très clair pour le fond des cartes (ex: #F1F5F9)"},
+                "card_border": {"type": "STRING", "description": "Code HEX doux pour le contour (ex: #CBD5E1)"}
+            },
+            "required": ["primary", "accent", "card_bg", "card_border"]
+        },
         "slides": {
             "type": "ARRAY",
             "items": {
                 "type": "OBJECT",
                 "properties": {
                     "slide_title": {"type": "STRING"},
-                    "subtitle": {"type": "STRING", "description": "Phrase courte d'introduction ou question-clé"},
+                    "subtitle": {"type": "STRING"},
                     "cards": {
                         "type": "ARRAY",
                         "items": {
                             "type": "OBJECT",
                             "properties": {
-                                "badge": {"type": "STRING", "description": "Court mot-clé ou étape (ex: Étape 1, Attention, À retenir)"},
-                                "card_title": {"type": "STRING", "description": "Titre du bloc avec un émoji explicite"},
+                                "badge": {"type": "STRING"},
+                                "card_title": {"type": "STRING"},
                                 "points": {
                                     "type": "ARRAY",
-                                    "items": {"type": "STRING"},
-                                    "description": "1 à 3 phrases très claires ou puces concrètes"
+                                    "items": {"type": "STRING"}
                                 }
                             },
                             "required": ["badge", "card_title", "points"]
-                        },
-                        "description": "Exactement 2 ou 3 cartes pour structurer la slide visuellement"
+                        }
                     }
                 },
                 "required": ["slide_title", "subtitle", "cards"]
             }
         }
     },
-    "required": ["title", "slides"]
+    "required": ["title", "palette", "slides"]
 }
 
-# Palettes de couleurs harmonisées
-PALETTES = {
+# Palettes manuelles de secours
+PRESET_PALETTES = {
     "Bleu Éducatif (Moderne & Sobre)": {
-        "primary": RGBColor(30, 58, 138),       # Bleu foncé
-        "accent": RGBColor(59, 130, 246),        # Bleu vif
-        "card_bg": RGBColor(241, 245, 249),      # Gris-bleu très clair
-        "card_border": RGBColor(203, 213, 225),  # Bordure douce
-        "text_dark": RGBColor(15, 23, 42),       # Texte principal
-        "text_muted": RGBColor(71, 85, 105)      # Texte secondaire
+        "primary": RGBColor(30, 58, 138),
+        "accent": RGBColor(59, 130, 246),
+        "card_bg": RGBColor(241, 245, 249),
+        "card_border": RGBColor(203, 213, 225),
+        "text_dark": RGBColor(15, 23, 42),
+        "text_muted": RGBColor(71, 85, 105)
     },
     "Tons Chauds (Terracotta & Ambre)": {
         "primary": RGBColor(154, 52, 18),
@@ -191,25 +199,46 @@ PALETTES = {
     }
 }
 
-# --- GÉNÉRATEUR PPTX AVEC VRAI DESIGN EN CARTES VISUELLES ---
+def hex_to_rgb(hex_code, fallback):
+    try:
+        clean = hex_code.lstrip("#")
+        if len(clean) == 6:
+            return RGBColor.from_string(clean)
+    except Exception:
+        pass
+    return fallback
+
+def resolve_palette(data, choice):
+    if choice in PRESET_PALETTES:
+        return PRESET_PALETTES[choice]
+    
+    # Palette créative générée par Gemini
+    ai_pal = data.get("palette", {})
+    return {
+        "primary": hex_to_rgb(ai_pal.get("primary", ""), RGBColor(30, 58, 138)),
+        "accent": hex_to_rgb(ai_pal.get("accent", ""), RGBColor(59, 130, 246)),
+        "card_bg": hex_to_rgb(ai_pal.get("card_bg", ""), RGBColor(241, 245, 249)),
+        "card_border": hex_to_rgb(ai_pal.get("card_border", ""), RGBColor(203, 213, 225)),
+        "text_dark": RGBColor(15, 23, 42),
+        "text_muted": RGBColor(71, 85, 105)
+    }
+
+# --- CRÉATION POWERPOINT ---
 def build_card_presentation(data, level_name, palette_choice):
-    pal = PALETTES.get(palette_choice, PALETTES["Bleu Éducatif (Moderne & Sobre)"])
+    pal = resolve_palette(data, palette_choice)
 
     prs = Presentation()
-    prs.slide_width = Inches(13.333)  # Format écran large 16:9
+    prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
-    # === SLIDE 1 : COUVERTURE ===
+    # Slide 1 : Couverture
     s_cover = prs.slides.add_slide(blank_layout)
-
-    # Bandeau supérieur décoratif
     banner = s_cover.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, Inches(0.4))
     banner.fill.solid()
     banner.fill.fore_color.rgb = pal["accent"]
     banner.line.color.rgb = pal["accent"]
 
-    # Carte centrale de présentation
     center_card = s_cover.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE,
         Inches(1.5), Inches(1.5), Inches(10.33), Inches(4.8)
@@ -219,7 +248,6 @@ def build_card_presentation(data, level_name, palette_choice):
     center_card.line.color.rgb = pal["card_border"]
     center_card.line.width = Pt(2)
 
-    # Titre et informations de niveau
     tb_cov = s_cover.shapes.add_textbox(Inches(2.0), Inches(2.2), Inches(9.33), Inches(3.5))
     tf_cov = tb_cov.text_frame
     tf_cov.word_wrap = True
@@ -243,17 +271,15 @@ def build_card_presentation(data, level_name, palette_choice):
     p_desc.font.size = Pt(18)
     p_desc.font.color.rgb = pal["text_muted"]
 
-    # === SLIDES SUIVANTES : STRUCTURE EN CARTES VISUELLES ===
+    # Slides de contenu
     for slide_data in data["slides"]:
         s = prs.slides.add_slide(blank_layout)
 
-        # Liseré supérieur coloré
         top_bar = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, Inches(0.18))
         top_bar.fill.solid()
         top_bar.fill.fore_color.rgb = pal["accent"]
         top_bar.line.color.rgb = pal["accent"]
 
-        # En-tête de la slide (Titre & Sous-titre)
         header_box = s.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.73), Inches(1.2))
         tf_h = header_box.text_frame
         tf_h.word_wrap = True
@@ -271,7 +297,6 @@ def build_card_presentation(data, level_name, palette_choice):
             p_sub.font.color.rgb = pal["text_muted"]
             p_sub.space_before = Pt(4)
 
-        # Disposition en 2 ou 3 colonnes de cartes
         cards = slide_data.get("cards", [])
         nb_cards = max(1, len(cards))
         margin_x = Inches(0.8)
@@ -284,7 +309,6 @@ def build_card_presentation(data, level_name, palette_choice):
         for i, card_info in enumerate(cards):
             card_left = margin_x + i * (card_w + gap_x)
 
-            # Rectangle arrondi pour la carte
             card_shape = s.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
                 card_left, card_top, card_w, card_h
@@ -294,7 +318,6 @@ def build_card_presentation(data, level_name, palette_choice):
             card_shape.line.color.rgb = pal["card_border"]
             card_shape.line.width = Pt(1.5)
 
-            # Zone de texte à l'intérieur de la carte
             pad = Inches(0.25)
             content_box = s.shapes.add_textbox(
                 card_left + pad, card_top + pad, card_w - (pad * 2), card_h - (pad * 2)
@@ -302,7 +325,6 @@ def build_card_presentation(data, level_name, palette_choice):
             tf_c = content_box.text_frame
             tf_c.word_wrap = True
 
-            # Badge / étiquette en haut de la carte
             p_c_badge = tf_c.paragraphs[0]
             p_c_badge.text = card_info.get("badge", "").upper()
             p_c_badge.font.size = Pt(12)
@@ -310,7 +332,6 @@ def build_card_presentation(data, level_name, palette_choice):
             p_c_badge.font.color.rgb = pal["accent"]
             p_c_badge.space_after = Pt(8)
 
-            # Titre de la carte
             p_c_title = tf_c.add_paragraph()
             p_c_title.text = card_info.get("card_title", "")
             p_c_title.font.size = Pt(20)
@@ -318,7 +339,6 @@ def build_card_presentation(data, level_name, palette_choice):
             p_c_title.font.color.rgb = pal["primary"]
             p_c_title.space_after = Pt(12)
 
-            # Points / contenu
             for point in card_info.get("points", []):
                 p_c_pt = tf_c.add_paragraph()
                 p_c_pt.text = f"•  {point}"
@@ -331,7 +351,7 @@ def build_card_presentation(data, level_name, palette_choice):
     output.seek(0)
     return output
 
-# --- FONCTION DE GÉNÉRATION PAR VERSION ---
+# --- GÉNÉRATION ---
 def run_generation(level_type):
     if not api_key:
         st.error("⚠️ Clé GEMINI_API_KEY introuvable dans les Secrets de Streamlit.")
@@ -344,7 +364,7 @@ def run_generation(level_type):
     status_text = st.empty()
 
     try:
-        status_text.markdown("*Étape 1/3 : Analyse du niveau et des consignes pédagogiques...*")
+        status_text.markdown("*Étape 1/3 : Analyse du sujet et détermination de la palette adaptée...*")
         progress_bar.progress(20)
 
         t_bytes = template_file.getvalue() if template_file else None
@@ -354,7 +374,7 @@ def run_generation(level_type):
             if samples:
                 style_guide = (
                     "\n\nVoici des exemples du style d'écriture de l'enseignant. "
-                    "Imite strictement son ton, son niveau de clarté et sa façon de formuler les points clés :\n"
+                    "Imite son ton et sa clarté sans reprendre ses anciens sujets :\n"
                     f"\"\"\"\n{samples}\n\"\"\""
                 )
 
@@ -372,9 +392,16 @@ def run_generation(level_type):
         title_rule = f"Titre imposé : {custom_title}" if custom_title.strip() else "Trouve un titre pédagogique clair et motivant."
         needs_rule = f"Consignes pédagogiques spécifiques : {pedagogy_notes}" if pedagogy_notes.strip() else ""
 
+        color_instruction = (
+            "Pour le champ 'palette', choisis 4 couleurs HEX adaptées au thème abordé "
+            "(par exemple des tons ambrés/rouges pour le feu ou l'histoire, des verts pour la nature/SVT, des bleus pour l'eau ou la science, etc.). "
+            "Garantis un excellent contraste : 'primary' foncé, 'accent' vif, 'card_bg' très clair pastel, 'card_border' douce."
+        )
+
         sys_prompt = (
-            f"Tu es un expert en différenciation pédagogique et en conception de présentations visuelles.\n"
+            f"Tu es un expert en différenciation pédagogique et en design graphique.\n"
             f"{pedagogy_target}\n"
+            f"{color_instruction}\n"
             f"{style_guide}"
         )
 
@@ -382,18 +409,16 @@ def run_generation(level_type):
             f"{title_rule}\n"
             f"Sujet du cours : {topic}\n"
             f"{needs_rule}\n"
-            f"Génère exactement {nb_slides} diapositives. Pour chaque diapositive, fournis un titre, "
-            f"un court sous-titre explicatif et 2 ou 3 blocs structurés ('cards') avec badge, titre de carte et points."
+            f"Génère exactement {nb_slides} diapositives avec leur palette et leurs cartes structurées."
         )
 
-        status_text.markdown("*Étape 2/3 : Rédaction et structuration en cartes visuelles par Gemini...*")
+        status_text.markdown("*Étape 2/3 : Rédaction et composition visuelle par Gemini...*")
         progress_bar.progress(60)
 
         client = genai.Client(api_key=api_key)
         response = None
         last_err = None
 
-        # Modèles stables
         for mdl in ["gemini-2.5-flash", "gemini-2.0-flash"]:
             try:
                 response = client.models.generate_content(
@@ -415,7 +440,7 @@ def run_generation(level_type):
         if not response or not response.text:
             raise last_err
 
-        status_text.markdown("*Étape 3/3 : Création d'un PowerPoint neuf avec mise en page en cartes...*")
+        status_text.markdown("*Étape 3/3 : Création d'un PowerPoint neuf avec les couleurs thématiques...*")
         progress_bar.progress(90)
 
         data = json.loads(response.text)
@@ -436,7 +461,7 @@ def run_generation(level_type):
         status_text.empty()
         st.error(f"Une erreur est survenue lors de la génération : {e}")
 
-# --- 3. DEUX BOUTONS SÉPARÉS ---
+# --- BOUTONS ---
 col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     if st.button("🟢 Générer la version Adaptée", type="primary", use_container_width=True):
@@ -446,7 +471,7 @@ with col_btn2:
     if st.button("🔵 Générer la version Approfondie", type="secondary", use_container_width=True):
         run_generation("advanced")
 
-# --- 4. PRÉVISUALISATION ET TÉLÉCHARGEMENT ---
+# --- PRÉVISUALISATION & TÉLÉCHARGEMENT ---
 has_adapted = "deck_adapted" in st.session_state
 has_advanced = "deck_advanced" in st.session_state
 
