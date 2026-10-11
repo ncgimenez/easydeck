@@ -1,6 +1,5 @@
 import io
 import json
-import copy
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -10,6 +9,7 @@ from pptx.dml.color import RGBColor
 
 st.set_page_config(page_title="DuoDeck", layout="centered", page_icon="🪄")
 
+# --- CSS ÉPURÉ & MODERNE ---
 st.markdown("""
 <style>
     .block-container {
@@ -30,13 +30,20 @@ st.markdown("""
         font-size: 1rem;
         opacity: 0.8;
     }
-    div.stButton > button:first-child {
-        width: 100%;
-        border-radius: 12px;
-        height: 3.2rem;
-        font-size: 1.1rem;
+    .slide-preview-card {
+        background-color: rgba(125, 125, 125, 0.08);
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+    }
+    .slide-title-tag {
+        font-weight: 700;
+        font-size: 1.05rem;
+        margin-bottom: 0.4rem;
+    }
+    div.stButton > button {
+        border-radius: 10px;
         font-weight: bold;
-        margin-top: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -44,32 +51,39 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <div class="main-title">🪄 DuoDeck</div>
-    <div class="main-subtitle">Générez vos diapositives adaptées et approfondies à partir de vos propres modèles.</div>
+    <div class="main-subtitle">Générez vos diapositives adaptées ou approfondies de façon ciblée.</div>
 </div>
 """, unsafe_allow_html=True)
 
 api_key = st.secrets.get("GEMINI_API_KEY", None)
 
-# --- 1. MODÈLE MAÎTRE ---
-st.subheader("🎨 Votre modèle PowerPoint (.pptx)")
+# --- 1. MODÈLE & AMBIANCE ---
+st.subheader("🎨 Modèle & Ambiance visuelle")
 template_file = st.file_uploader(
-    "Déposez votre présentation PowerPoint modèle",
+    "Déposez votre présentation modèle (.pptx, optionnel)",
     type=["pptx"],
-    help="DuoDeck conservera vos polices, vos couleurs, vos arrières-plans et votre disposition."
+    help="DuoDeck conservera vos polices, formes et arrières-plans."
 )
 
 col_opt1, col_opt2 = st.columns(2)
 with col_opt1:
-    use_style_instruction = st.checkbox("Imiter le style d'écriture de ce modèle", value=True)
+    use_style_instruction = st.checkbox("Imiter le style d'écriture du modèle", value=True)
 with col_opt2:
     color_scheme = st.selectbox(
-        "Nuance des titres & textes",
-        ["Conserver les couleurs d'origine", "Bleu nuit & Ardoise", "Tons chauds (Terracotta)", "Vert sauge (Apaisant)"]
+        "Nuance des couleurs",
+        [
+            "Harmonie créative adaptée au sujet (recommandé)",
+            "Conserver les couleurs d'origine du modèle",
+            "Bleu nuit & Ardoise",
+            "Tons chauds (Terracotta)",
+            "Vert sauge (Apaisant)"
+        ],
+        index=0
     )
 
 st.divider()
 
-# --- 2. LE NOUVEAU COURS ---
+# --- 2. PARAMÈTRES DU COURS ---
 st.subheader("📝 Paramètres de la leçon")
 custom_title = st.text_input("Titre du cours (optionnel)", placeholder="Ex : Les étapes du cycle de l'eau")
 topic = st.text_area(
@@ -83,27 +97,26 @@ with col_s1:
     nb_slides = st.slider("Nombre de diapositives", min_value=2, max_value=8, value=4)
 with col_s2:
     pedagogy_notes = st.text_input(
-        "Consignes spécifiques de structure",
-        placeholder="Ex : 2 phrases max par slide, émojis explicites, vocabulaire simple..."
+        "Consignes spécifiques",
+        placeholder="Ex : 2 phrases max, émojis concrets, pas de vocabulaire abstrait..."
     )
 
-# --- EXTRACTION DU STYLE RÉDACTIONNEL DU MODÈLE ---
+# --- OUTILS & SCHÉMAS ---
 def extract_writing_style(pptx_bytes):
     try:
         prs = Presentation(io.BytesIO(pptx_bytes))
-        sample_texts = []
+        samples = []
         for slide in prs.slides:
             for shape in slide.shapes:
                 if shape.has_text_frame:
                     for p in shape.text_frame.paragraphs:
                         txt = p.text.strip()
                         if txt and len(txt) > 3:
-                            sample_texts.append(txt)
-        return "\n".join(sample_texts[:25])
+                            samples.append(txt)
+        return "\n".join(samples[:25])
     except Exception:
         return ""
 
-# Schéma JSON
 response_schema = {
     "type": "OBJECT",
     "properties": {
@@ -114,39 +127,32 @@ response_schema = {
                 "type": "OBJECT",
                 "properties": {
                     "slide_title": {"type": "STRING"},
-                    "adapted_content": {
+                    "bullets": {
                         "type": "ARRAY",
-                        "items": {"type": "STRING"},
-                        "description": "Phrases très courtes, simples, repères clairs avec émojis pour besoins spécifiques."
-                    },
-                    "advanced_content": {
-                        "type": "ARRAY",
-                        "items": {"type": "STRING"},
-                        "description": "Notions plus riches, phrases complètes et vocabulaire approfondi."
+                        "items": {"type": "STRING"}
                     }
                 },
-                "required": ["slide_title", "adapted_content", "advanced_content"]
+                "required": ["slide_title", "bullets"]
             }
         }
     },
     "required": ["title", "slides"]
 }
 
-# --- GÉNÉRATION EN RÉUTILISANT LE TEMPLATE PPTX ---
-def apply_color_override(paragraph, choice):
+def get_color_rgb(choice, is_title=True):
     if choice == "Bleu nuit & Ardoise":
-        paragraph.font.color.rgb = RGBColor(30, 41, 59)
+        return RGBColor(30, 41, 59) if is_title else RGBColor(71, 85, 105)
     elif choice == "Tons chauds (Terracotta)":
-        paragraph.font.color.rgb = RGBColor(154, 52, 18)
+        return RGBColor(154, 52, 18) if is_title else RGBColor(120, 53, 15)
     elif choice == "Vert sauge (Apaisant)":
-        paragraph.font.color.rgb = RGBColor(47, 79, 79)
+        return RGBColor(47, 79, 79) if is_title else RGBColor(64, 93, 84)
+    # Mode créatif automatique par défaut : palette moderne bleu-indigo contrastée
+    return RGBColor(37, 99, 235) if is_title else RGBColor(51, 65, 85)
 
-def generate_from_template(template_bytes, data, level_key, color_choice):
-    # Si l'utilisateur n'a pas mis de modèle, on crée une présentation vierge 16:9
+def build_presentation(template_bytes, data, level_name, color_choice):
     if template_bytes is None:
         prs = Presentation()
-        prs.slide_width = Inches(13.333)
-        prs.slide_height = Inches(7.5)
+        prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
         blank = prs.slide_layouts[6]
         
         # Titre
@@ -156,219 +162,237 @@ def generate_from_template(template_bytes, data, level_key, color_choice):
         p.text = data["title"]
         p.font.size = Pt(44)
         p.font.bold = True
-        apply_color_override(p, color_choice)
-        
-        # Diapositives de cours
+        p.font.color.rgb = get_color_rgb(color_choice, is_title=True)
+
+        p2 = tb.text_frame.add_paragraph()
+        p2.text = f"— {level_name} —"
+        p2.font.size = Pt(22)
+        p2.font.color.rgb = RGBColor(100, 116, 139)
+
+        # Diapositives
         for item in data["slides"]:
             s = prs.slides.add_slide(blank)
             box = s.shapes.add_textbox(Inches(1.2), Inches(1.2), Inches(11), Inches(5))
             tf = box.text_frame
             tf.word_wrap = True
             
-            p_title = tf.paragraphs[0]
-            p_title.text = item["slide_title"]
-            p_title.font.size = Pt(32)
-            p_title.font.bold = True
-            p_title.space_after = Pt(16)
-            apply_color_override(p_title, color_choice)
+            pt = tf.paragraphs[0]
+            pt.text = item["slide_title"]
+            pt.font.size = Pt(32)
+            pt.font.bold = True
+            pt.font.color.rgb = get_color_rgb(color_choice, is_title=True)
+            pt.space_after = Pt(16)
 
-            for b in item[level_key]:
+            for b in item["bullets"]:
                 pb = tf.add_paragraph()
                 pb.text = b
                 pb.font.size = Pt(22)
+                pb.font.color.rgb = get_color_rgb(color_choice, is_title=False)
                 pb.space_after = Pt(12)
-                if color_choice != "Conserver les couleurs d'origine":
-                    pb.font.color.rgb = RGBColor(71, 85, 105)
     else:
-        # Réutilisation du fichier modèle fourni
         prs = Presentation(io.BytesIO(template_bytes))
-        
-        # On repère les slides types du modèle (slide 1 = couverture, slide 2 = contenu si elle existe)
-        title_layout = prs.slides[0].slide_layout if len(prs.slides) > 0 else prs.slide_layouts[0]
-        content_layout = prs.slides[1].slide_layout if len(prs.slides) > 1 else title_layout
+        content_layout = prs.slides[1].slide_layout if len(prs.slides) > 1 else (prs.slides[0].slide_layout if len(prs.slides) > 0 else prs.slide_layouts[0])
 
-        # On injecte le titre sur la slide 1 existante ou nouvelle
         if len(prs.slides) > 0:
-            slide_1 = prs.slides[0]
-            for shape in slide_1.shapes:
-                if shape.has_text_frame and shape.text_frame.text.strip():
-                    shape.text_frame.text = data["title"]
-                    if color_choice != "Conserver les couleurs d'origine":
-                        for p in shape.text_frame.paragraphs:
-                            apply_color_override(p, color_choice)
+            for s in prs.slides[0].shapes:
+                if s.has_text_frame and s.text_frame.text.strip():
+                    s.text_frame.text = data["title"]
                     break
-        
-        # Ajout des diapositives en respectant le template
+
         for item in data["slides"]:
-            new_slide = prs.slides.add_slide(content_layout)
-            
-            # Recherche des zones de titre et corps préexistantes dans le layout
-            title_set = False
-            content_set = False
-            
-            for shape in new_slide.shapes:
+            ns = prs.slides.add_slide(content_layout)
+            placed_title, placed_content = False, False
+
+            for shape in ns.shapes:
                 if shape.has_text_frame:
                     tf = shape.text_frame
-                    if not title_set:
+                    if not placed_title:
                         tf.text = item["slide_title"]
-                        title_set = True
-                        if color_choice != "Conserver les couleurs d'origine":
+                        placed_title = True
+                        if color_choice != "Conserver les couleurs d'origine du modèle":
                             for p in tf.paragraphs:
-                                apply_color_override(p, color_choice)
-                    elif not content_set:
+                                p.font.color.rgb = get_color_rgb(color_choice, is_title=True)
+                    elif not placed_content:
                         tf.text = ""
-                        for idx, bullet_text in enumerate(item[level_key]):
+                        for idx, b in enumerate(item["bullets"]):
                             p = tf.add_paragraph() if idx > 0 else tf.paragraphs[0]
-                            p.text = bullet_text
+                            p.text = b
                             p.font.size = Pt(22)
                             p.space_after = Pt(10)
-                        content_set = True
+                            if color_choice != "Conserver les couleurs d'origine du modèle":
+                                p.font.color.rgb = get_color_rgb(color_choice, is_title=False)
+                        placed_content = True
                         break
-            
-            # S'il n'y avait pas de placeholder texte, on pose un bloc propre
-            if not title_set or not content_set:
-                box = new_slide.shapes.add_textbox(Inches(1.2), Inches(1.2), Inches(11), Inches(5))
+
+            if not placed_title or not placed_content:
+                box = ns.shapes.add_textbox(Inches(1.2), Inches(1.2), Inches(11), Inches(5))
                 tf = box.text_frame
                 tf.word_wrap = True
-                p_t = tf.paragraphs[0]
-                p_t.text = item["slide_title"]
-                p_t.font.size = Pt(32)
-                p_t.font.bold = True
-                p_t.space_after = Pt(14)
-                apply_color_override(p_t, color_choice)
-                
-                for bullet_text in item[level_key]:
+                pt = tf.paragraphs[0]
+                pt.text = item["slide_title"]
+                pt.font.size = Pt(32)
+                pt.font.bold = True
+                pt.space_after = Pt(14)
+                if color_choice != "Conserver les couleurs d'origine du modèle":
+                    pt.font.color.rgb = get_color_rgb(color_choice, is_title=True)
+
+                for b in item["bullets"]:
                     pb = tf.add_paragraph()
-                    pb.text = bullet_text
+                    pb.text = b
                     pb.font.size = Pt(22)
                     pb.space_after = Pt(10)
+                    if color_choice != "Conserver les couleurs d'origine du modèle":
+                        pb.font.color.rgb = get_color_rgb(color_choice, is_title=False)
 
     out = io.BytesIO()
     prs.save(out)
     out.seek(0)
     return out
 
-# --- GÉNÉRATION ---
-
-if st.button("✨ Générer mes deux présentations", type="primary"):
+def run_generation(level_type):
     if not api_key:
-        st.error("⚠️ Clé GEMINI_API_KEY introuvable dans les Secrets de Streamlit.")
-    elif not topic.strip():
-        st.warning("Veuillez indiquer un sujet de cours.")
-    else:
-        # Barre de progression et message d'état
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        st.error("⚠️ Clé GEMINI_API_KEY manquante dans les Secrets Streamlit.")
+        return
+    if not topic.strip():
+        st.warning("Veuillez renseigner un sujet de cours.")
+        return
 
-        try:
-            # Étape 1 : Préparation
-            status_text.markdown("*Étape 1/4 : Analyse de votre modèle et préparation des consignes... (estimé : ~15 sec au total)*")
-            progress_bar.progress(15)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-            t_bytes = template_file.getvalue() if template_file else None
-            st.session_state["raw_template"] = t_bytes
-            
-            style_guide = ""
-            if t_bytes and use_style_instruction:
-                extracted_samples = extract_writing_style(t_bytes)
-                if extracted_samples:
-                    style_guide = (
-                        "\n\nVoici des exemples tirés du modèle de l'enseignant. "
-                        "Imite UNIQUEMENT la tournure de phrases, le niveau de langage et la structure (ne reprends pas les anciens sujets) :\n"
-                        f"\"\"\"\n{extracted_samples}\n\"\"\""
+    try:
+        status_text.markdown("*Étape 1/3 : Analyse du contexte et des consignes... (environ 10 secondes)*")
+        progress_bar.progress(20)
+
+        t_bytes = template_file.getvalue() if template_file else None
+        style_guide = ""
+        if t_bytes and use_style_instruction:
+            samples = extract_writing_style(t_bytes)
+            if samples:
+                style_guide = f"\n\nModèle d'écriture à imiter strictement en termes de structure et de ton (sans réutiliser les sujets) :\n\"\"\"\n{samples}\n\"\"\""
+
+        is_adapted = (level_type == "adapted")
+        pedagogy_target = (
+            "Syntaxe directe et épurée, repères visuels clairs avec émojis concrets, charge cognitive minimale."
+            if is_adapted else
+            "Notions approfondies, phrases rédigées et vocabulaire technique enrichi."
+        )
+
+        title_rule = f"Titre imposé : {custom_title}" if custom_title.strip() else "Trouve un titre pédagogique accrocheur."
+        needs_rule = f"Consignes pédagogiques spécifiques : {pedagogy_notes}" if pedagogy_notes.strip() else ""
+
+        sys_prompt = (
+            f"Tu es un expert en pédagogie spécialisée. Rédige les diapositives pour la version : '{level_type}'.\n"
+            f"Objectif : {pedagogy_target}\n"
+            f"{style_guide}"
+        )
+        prompt = f"{title_rule}\nSujet : {topic}\n{needs_rule}\nGénère exactement {nb_slides} diapositives avec le champ 'bullets' pour chaque diapositive."
+
+        status_text.markdown("*Étape 2/3 : Rédaction de la présentation par l'IA...*")
+        progress_bar.progress(55)
+
+        client = genai.Client(api_key=api_key)
+        response = None
+        last_err = None
+
+        for mdl in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+            try:
+                response = client.models.generate_content(
+                    model=mdl,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_prompt,
+                        response_mime_type="application/json",
+                        response_schema=response_schema,
+                        temperature=0.3
                     )
+                )
+                if response and response.text:
+                    break
+            except Exception as e:
+                last_err = e
+                continue
 
-            title_rule = f"Titre imposé : {custom_title}" if custom_title.strip() else "Trouve un titre pédagogique adapté."
-            needs_rule = f"Consignes pédagogiques spécifiques : {pedagogy_notes}" if pedagogy_notes.strip() else ""
+        if not response or not response.text:
+            raise last_err
 
-            sys_prompt = (
-                "Tu es un expert en pédagogie et en différenciation d'enseignement. "
-                "Tu produis deux niveaux pour chaque slide :\n"
-                "1. 'adapted_content' : syntaxe directe, phrases très courtes, repères et émojis concrets, charge cognitive allégée.\n"
-                "2. 'advanced_content' : notions complètes, phrases élaborées, vocabulaire approfondi.\n"
-                f"{style_guide}"
-            )
-            prompt = f"{title_rule}\nSujet du nouveau cours : {topic}\n{needs_rule}\nGénère {nb_slides} diapositives."
+        status_text.markdown("*Étape 3/3 : Finalisation et assemblage du support PowerPoint...*")
+        progress_bar.progress(90)
 
-            # Étape 2 : Rédaction par l'IA
-            status_text.markdown("*Étape 2/4 : Rédaction des versions adaptée et avancée par Gemini en cours...*")
-            progress_bar.progress(40)
+        data = json.loads(response.text)
+        session_key = f"deck_{level_type}"
+        st.session_state[session_key] = {
+            "data": data,
+            "pptx": build_presentation(t_bytes, data, "Niveau Adapté" if is_adapted else "Niveau Approfondi", color_scheme)
+        }
 
-            client = genai.Client(api_key=api_key)
-            
-            # Modèles officiels stables
-            models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
-            response = None
-            last_err = None
+        progress_bar.progress(100)
+        status_text.markdown("*Terminé !*")
+        st.success(f"🎉 Présentation {'Adaptée' if is_adapted else 'Avancée'} prête à être téléchargée !")
 
-            for mdl in models_to_try:
-                try:
-                    response = client.models.generate_content(
-                        model=mdl,                    
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=sys_prompt,
-                            response_mime_type="application/json",
-                            response_schema=response_schema,
-                            temperature=0.3
-                        )
-                    )
-                    if response and response.text:
-                        break
-                except Exception as e:
-                    last_err = e
-                    continue
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"Une erreur est survenue : {e}")
 
-            if not response or not response.text:
-                raise last_err
+# --- 3. LES DEUX BOUTONS DE CRÉATION SÉPARÉS ---
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if st.button("🟢 Générer la version Adaptée", type="primary", use_container_width=True):
+        run_generation("adapted")
 
-            # Étape 3 : Mise en page
-            status_text.markdown("*Étape 3/4 : Injection du contenu dans votre gabarit PowerPoint...*")
-            progress_bar.progress(80)
-            st.session_state["course_data"] = json.loads(response.text)
+with col_btn2:
+    if st.button("🔵 Générer la version Avancée", type="secondary", use_container_width=True):
+        run_generation("advanced")
 
-            # Étape 4 : Finalisation
-            progress_bar.progress(100)
-            status_text.markdown("*Étape 4/4 : Présentations prêtes !*")
-            st.success("🎉 Les deux présentations ont été générées avec succès !")
+# --- 4. AFFICHAGE ET TÉLÉCHARGEMENT ---
+has_adapted = "deck_adapted" in st.session_state
+has_advanced = "deck_advanced" in st.session_state
 
-        except Exception as e:
-            progress_bar.empty()
-            status_text.empty()
-            st.error(f"Une erreur est survenue : {e}")
-
-# --- AFFICHAGE & TÉLÉCHARGEMENT ---
-if "course_data" in st.session_state:
-    data = st.session_state["course_data"]
-    saved_template = st.session_state.get("raw_template", None)
-
+if has_adapted or has_advanced:
     st.divider()
-    st.subheader(f"📖 {data['title']}")
+    tabs_to_show = []
+    if has_adapted:
+        tabs_to_show.append("🟢 Version Adaptée")
+    if has_advanced:
+        tabs_to_show.append("🔵 Version Approfondie")
 
-    t1, t2 = st.tabs(["🟢 Version Adaptée", "🔵 Version Avancée"])
+    tab_objs = st.tabs(tabs_to_show)
 
-    with t1:
-        for idx, s in enumerate(data["slides"], 1):
-            st.markdown(f"**Slide {idx} : {s['slide_title']}**")
-            for pt in s["adapted_content"]:
-                st.write(f"- {pt}")
-        pptx_out1 = generate_from_template(saved_template, data, "adapted_content", color_scheme)
-        st.download_button(
-            "📥 Télécharger la présentation Adaptée (.pptx)",
-            pptx_out1,
-            file_name="cours_adapte.pptx",
-            key="dl_1"
-        )
+    current_idx = 0
+    if has_adapted:
+        with tab_objs[current_idx]:
+            deck = st.session_state["deck_adapted"]
+            st.markdown(f"### 📖 {deck['data']['title']}")
+            for idx, s in enumerate(deck["data"]["slides"], 1):
+                st.markdown(f"""
+                <div class="slide-preview-card" style="border-left: 4px solid #10b981;">
+                    <div class="slide-title-tag">Diapositive {idx} : {s['slide_title']}</div>
+                    {''.join([f'<div style=\"margin-bottom: 3px;\">• {b}</div>' for b in s['bullets']])}
+                </div>
+                """, unsafe_allow_html=True)
+            st.download_button(
+                "📥 Télécharger la version Adaptée (.pptx)",
+                deck["pptx"],
+                file_name="cours_adapte.pptx",
+                key="dl_adapted"
+            )
+        current_idx += 1
 
-    with t2:
-        for idx, s in enumerate(data["slides"], 1):
-            st.markdown(f"**Slide {idx} : {s['slide_title']}**")
-            for pt in s["advanced_content"]:
-                st.write(f"- {pt}")
-        pptx_out2 = generate_from_template(saved_template, data, "advanced_content", color_scheme)
-        st.download_button(
-            "📥 Télécharger la présentation Avancée (.pptx)",
-            pptx_out2,
-            file_name="cours_avance.pptx",
-            key="dl_2"
-        )
+    if has_advanced:
+        with tab_objs[current_idx]:
+            deck = st.session_state["deck_advanced"]
+            st.markdown(f"### 📖 {deck['data']['title']}")
+            for idx, s in enumerate(deck["data"]["slides"], 1):
+                st.markdown(f"""
+                <div class="slide-preview-card" style="border-left: 4px solid #3b82f6;">
+                    <div class="slide-title-tag">Diapositive {idx} : {s['slide_title']}</div>
+                    {''.join([f'<div style=\"margin-bottom: 3px;\">• {b}</div>' for b in s['bullets']])}
+                </div>
+                """, unsafe_allow_html=True)
+            st.download_button(
+                "📥 Télécharger la version Approfondie (.pptx)",
+                deck["pptx"],
+                file_name="cours_avance.pptx",
+                key="dl_advanced"
+            )
