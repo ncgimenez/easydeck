@@ -8,7 +8,7 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pypdf import PdfReader
 
-st.set_page_config(page_title="DuoDeck", layout="centered", page_icon="🪄")
+st.set_page_config(page_title="EasyDeck", layout="centered", page_icon="🪄")
 
 # CSS adapté au mode clair et sombre
 st.markdown("""
