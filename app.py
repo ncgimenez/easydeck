@@ -296,8 +296,7 @@ def run_generation(level_type):
         last_err = None
 
         
-        for mdl in ["gemini-2.0-flash", "gemini-2.0-flash-lite"]:
-        
+        for mdl in ["gemini-3.5-flash-lite", "gemini-2.5-flash"]:
                     
             
             try:
