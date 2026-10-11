@@ -118,7 +118,7 @@ def extract_writing_style(pptx_bytes):
     except Exception:
         return ""
 
-# Schéma JSON incluant la génération automatique de palette de couleurs par Gemini
+# Schéma structuré par "Cartes visuelles" avec palette thématique générée par l'IA
 response_schema = {
     "type": "OBJECT",
     "properties": {
@@ -163,7 +163,6 @@ response_schema = {
     "required": ["title", "palette", "slides"]
 }
 
-# Palettes manuelles de secours
 PRESET_PALETTES = {
     "Bleu Éducatif (Moderne & Sobre)": {
         "primary": RGBColor(30, 58, 138),
@@ -212,7 +211,6 @@ def resolve_palette(data, choice):
     if choice in PRESET_PALETTES:
         return PRESET_PALETTES[choice]
     
-    # Palette créative générée par Gemini
     ai_pal = data.get("palette", {})
     return {
         "primary": hex_to_rgb(ai_pal.get("primary", ""), RGBColor(30, 58, 138)),
@@ -223,7 +221,7 @@ def resolve_palette(data, choice):
         "text_muted": RGBColor(71, 85, 105)
     }
 
-# --- CRÉATION POWERPOINT ---
+# --- CRÉATION DU DIAPORAMA NEUF EN CARTES ---
 def build_card_presentation(data, level_name, palette_choice):
     pal = resolve_palette(data, palette_choice)
 
@@ -364,7 +362,7 @@ def run_generation(level_type):
     status_text = st.empty()
 
     try:
-        status_text.markdown("*Étape 1/3 : Analyse du sujet et détermination de la palette adaptée...*")
+        status_text.markdown("*Étape 1/3 : Analyse du sujet et création de la palette thématique...*")
         progress_bar.progress(20)
 
         t_bytes = template_file.getvalue() if template_file else None
@@ -419,7 +417,8 @@ def run_generation(level_type):
         response = None
         last_err = None
 
-        for mdl in ["gemini-2.5-flash", "gemini-2.0-flash"]:
+        # Modèles actuellement supportés par l'API
+        for mdl in ["gemini-3.8-flash", "gemini-3.5-flash-lite"]:
             try:
                 response = client.models.generate_content(
                     model=mdl,
@@ -440,7 +439,7 @@ def run_generation(level_type):
         if not response or not response.text:
             raise last_err
 
-        status_text.markdown("*Étape 3/3 : Création d'un PowerPoint neuf avec les couleurs thématiques...*")
+        status_text.markdown("*Étape 3/3 : Création du diaporama neuf avec les cartes visuelles...*")
         progress_bar.progress(90)
 
         data = json.loads(response.text)
