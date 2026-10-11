@@ -295,7 +295,11 @@ def run_generation(level_type):
         response = None
         last_err = None
 
-        for mdl in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+        
+        for mdl in ["gemini-2.0-flash", "gemini-2.0-flash-lite"]:
+        
+                    
+            
             try:
                 response = client.models.generate_content(
                     model=mdl,
