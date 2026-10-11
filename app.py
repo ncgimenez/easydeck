@@ -249,6 +249,7 @@ def generate_from_template(template_bytes, data, level_key, color_choice):
     return out
 
 # --- GÉNÉRATION ---
+
 if st.button("✨ Générer mes deux présentations", type="primary"):
     if not api_key:
         st.error("⚠️ Clé GEMINI_API_KEY introuvable dans les Secrets de Streamlit.")
