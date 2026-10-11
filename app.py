@@ -44,7 +44,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <div class="main-title">🪄 DuoDeck</div>
+    <div class="main-title">🪄 EasyDeck</div>
     <div class="main-subtitle">Générez deux versions différenciées (adaptée & avancée) en un clic.</div>
 </div>
 """, unsafe_allow_html=True)
