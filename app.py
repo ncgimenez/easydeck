@@ -256,49 +256,85 @@ if st.button("✨ Générer mes deux présentations", type="primary"):
     elif not topic.strip():
         st.warning("Veuillez indiquer un sujet de cours.")
     else:
+        # Barre de progression et message d'état
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
         try:
-            with st.spinner("Conception pédagogique basée sur votre modèle..."):
-                t_bytes = template_file.getvalue() if template_file else None
-                st.session_state["raw_template"] = t_bytes
-                
-                style_guide = ""
-                if t_bytes and use_style_instruction:
-                    extracted_samples = extract_writing_style(t_bytes)
-                    if extracted_samples:
-                        style_guide = (
-                            "\n\nVoici des exemples tirés du modèle de l'enseignant. "
-                            "Imite UNIQUEMENT la tournure de phrases, le niveau de langage et la structure (ne reprends pas les anciens sujets) :\n"
-                            f"\"\"\"\n{extracted_samples}\n\"\"\""
-                        )
+            # Étape 1 : Préparation
+            status_text.markdown("*Étape 1/4 : Analyse de votre modèle et préparation des consignes... (estimé : ~15 sec au total)*")
+            progress_bar.progress(15)
 
-                title_rule = f"Titre imposé : {custom_title}" if custom_title.strip() else "Trouve un titre pédagogique adapté."
-                needs_rule = f"Consignes pédagogiques spécifiques : {pedagogy_notes}" if pedagogy_notes.strip() else ""
-
-                sys_prompt = (
-                    "Tu es un expert en pédagogie et en différenciation d'enseignement. "
-                    "Tu produis deux niveaux pour chaque slide :\n"
-                    "1. 'adapted_content' : syntaxe directe, phrases très courtes, repères et émojis concrets, charge cognitive allégée.\n"
-                    "2. 'advanced_content' : notions complètes, phrases élaborées, vocabulaire approfondi.\n"
-                    f"{style_guide}"
-                )
-
-                prompt = f"{title_rule}\nSujet du nouveau cours : {topic}\n{needs_rule}\nGénère {nb_slides} diapositives."
-
-                client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash",                    
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=sys_prompt,
-                        response_mime_type="application/json",
-                        response_schema=response_schema,
-                        temperature=0.3
+            t_bytes = template_file.getvalue() if template_file else None
+            st.session_state["raw_template"] = t_bytes
+            
+            style_guide = ""
+            if t_bytes and use_style_instruction:
+                extracted_samples = extract_writing_style(t_bytes)
+                if extracted_samples:
+                    style_guide = (
+                        "\n\nVoici des exemples tirés du modèle de l'enseignant. "
+                        "Imite UNIQUEMENT la tournure de phrases, le niveau de langage et la structure (ne reprends pas les anciens sujets) :\n"
+                        f"\"\"\"\n{extracted_samples}\n\"\"\""
                     )
-                )
 
-                st.session_state["course_data"] = json.loads(response.text)
-                st.success("Présentations créées à partir de votre modèle !")
+            title_rule = f"Titre imposé : {custom_title}" if custom_title.strip() else "Trouve un titre pédagogique adapté."
+            needs_rule = f"Consignes pédagogiques spécifiques : {pedagogy_notes}" if pedagogy_notes.strip() else ""
+
+            sys_prompt = (
+                "Tu es un expert en pédagogie et en différenciation d'enseignement. "
+                "Tu produis deux niveaux pour chaque slide :\n"
+                "1. 'adapted_content' : syntaxe directe, phrases très courtes, repères et émojis concrets, charge cognitive allégée.\n"
+                "2. 'advanced_content' : notions complètes, phrases élaborées, vocabulaire approfondi.\n"
+                f"{style_guide}"
+            )
+            prompt = f"{title_rule}\nSujet du nouveau cours : {topic}\n{needs_rule}\nGénère {nb_slides} diapositives."
+
+            # Étape 2 : Rédaction par l'IA
+            status_text.markdown("*Étape 2/4 : Rédaction des versions adaptée et avancée par Gemini en cours...*")
+            progress_bar.progress(40)
+
+            client = genai.Client(api_key=api_key)
+            
+            # Modèles officiels stables
+            models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+            response = None
+            last_err = None
+
+            for mdl in models_to_try:
+                try:
+                    response = client.models.generate_content(
+                        model=mdl,                    
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=sys_prompt,
+                            response_mime_type="application/json",
+                            response_schema=response_schema,
+                            temperature=0.3
+                        )
+                    )
+                    if response and response.text:
+                        break
+                except Exception as e:
+                    last_err = e
+                    continue
+
+            if not response or not response.text:
+                raise last_err
+
+            # Étape 3 : Mise en page
+            status_text.markdown("*Étape 3/4 : Injection du contenu dans votre gabarit PowerPoint...*")
+            progress_bar.progress(80)
+            st.session_state["course_data"] = json.loads(response.text)
+
+            # Étape 4 : Finalisation
+            progress_bar.progress(100)
+            status_text.markdown("*Étape 4/4 : Présentations prêtes !*")
+            st.success("🎉 Les deux présentations ont été générées avec succès !")
+
         except Exception as e:
+            progress_bar.empty()
+            status_text.empty()
             st.error(f"Une erreur est survenue : {e}")
 
 # --- AFFICHAGE & TÉLÉCHARGEMENT ---
